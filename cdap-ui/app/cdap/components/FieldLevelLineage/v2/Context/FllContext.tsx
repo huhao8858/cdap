@@ -312,21 +312,25 @@ export class Provider extends React.Component<{ children }, IContextState> {
       return;
     }
 
-    const cb = (unrelatedFields) => {
-      // Look up the sets to update (cause or impact)
-      // Add unrelated fields to the appropriate entity in the cause or impact sets
-      updatedSets[entityId].unrelatedFields = unrelatedFields;
-      updatedSets[entityId].isExpanded = true;
-      this.setState(updatedSets);
-    };
     fetchUnrelatedFields(
       namespace,
       tablename,
       type,
       relatedFields,
       this.state.start,
-      this.state.end,
-      cb
+      this.state.end
+    ).subscribe(
+      (unrelatedFields) => {
+        // Look up the sets to update (cause or impact)
+        // Add unrelated fields to the appropriate entity in the cause or impact sets
+        updatedSets[entityId].unrelatedFields = unrelatedFields;
+        updatedSets[entityId].isExpanded = true;
+        this.setState(updatedSets);
+      },
+      (err) => {
+        // tslint:disable-next-line: no-console
+        console.error('Error getting unrelated fields', err);
+      }
     );
   };
 

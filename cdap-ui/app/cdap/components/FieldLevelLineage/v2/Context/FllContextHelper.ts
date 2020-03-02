@@ -421,34 +421,31 @@ export function fetchUnrelatedFields(
   type: string,
   relatedFields: IField[],
   start: ITimeType,
-  end: ITimeType,
-  cb: (fields: IField[]) => void
+  end: ITimeType
 ) {
-  // Filter out fields that are already being rendered to maintain field order
-  const getUnrelatedFields = (allFields: string[]) => {
-    const isRelatedField = (fieldId, fields) => {
-      return fields.filter((field) => field.id === fieldId).length > 0;
-    };
-
-    const unrelatedFields = allFields.filter((fieldname) => {
-      const fieldId = getFieldId(fieldname, tablename, namespace, type);
-      return !isRelatedField(fieldId, relatedFields);
-    });
-    return unrelatedFields.map((fieldname) => {
-      const fieldProperties: IField = {
-        type,
-        namespace,
-        name: fieldname,
-        dataset: tablename,
-        id: getFieldId(fieldname, tablename, namespace, type),
-      };
-      return fieldProperties;
-    });
+  const isUnrelatedField = (fieldname, fields) => {
+    const fieldId = getFieldId(fieldname, tablename, namespace, type);
+    return fields.filter((field) => field.id === fieldId).length === 0;
   };
+
+  const getFieldProperties = (fieldname) => {
+    const fieldProperties: IField = {
+      type,
+      namespace,
+      name: fieldname,
+      dataset: tablename,
+      id: getFieldId(fieldname, tablename, namespace, type),
+    };
+    return fieldProperties;
+  };
+
   const params = { namespace, entityId: tablename, start, end };
 
-  MyMetadataApi.getFields(params).subscribe((res) => {
-    const unrelatedFields = getUnrelatedFields(res);
-    cb(unrelatedFields);
+  const fieldsObservable = MyMetadataApi.getFields(params).map((res) => {
+    // Filter out fields that are already being rendered (to keep field order) and add field properties
+    return res
+      .filter((fieldname) => isUnrelatedField(fieldname, relatedFields))
+      .map((fieldname) => getFieldProperties(fieldname));
   });
+  return fieldsObservable;
 }
