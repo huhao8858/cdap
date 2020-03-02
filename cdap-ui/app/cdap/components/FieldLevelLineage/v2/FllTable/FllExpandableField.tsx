@@ -27,6 +27,7 @@ export const styles = (theme) => {
     root: {
       color: theme.palette.blue[200],
       fontSize: '0.92em',
+      cursor: 'pointer',
     },
   };
 };
