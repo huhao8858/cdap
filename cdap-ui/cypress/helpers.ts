@@ -114,7 +114,6 @@ function deployAndTestPipeline(filename, pipelineName, done) {
     .type('{enter}');
   cy.get('[data-testid=deploy-pipeline]').click();
   cy.get('[data-cy="Deployed"]', { timeout: 20000 }).should('contain', 'Deployed');
-  cy.screenshot();
   cy.url()
     .should('include', `/view/${pipelineName}`)
     .then(() => done());

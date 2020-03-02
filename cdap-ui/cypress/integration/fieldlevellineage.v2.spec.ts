@@ -38,11 +38,18 @@ describe('Generating and navigating field level lineage for datasets', () => {
       // Update and save runtime arguments
       cy.get('.arrow-btn-container').click();
       cy.get('[data-cy="key-value-pair-0"] .value-input')
+        .should('exist')
         .focus()
         .type(DEFAULT_GCP_SERVICEACCOUNT_PATH);
       cy.get('[data-cy="key-value-pair-1"] .value-input')
+        .should('exist')
         .focus()
         .type(DEFAULT_GCP_PROJECTID);
+      // TO DO: Fix test to not need second attempt to input value
+      cy.get('[data-cy="key-value-pair-0"] .value-input')
+        .should('exist')
+        .clear()
+        .type(DEFAULT_GCP_SERVICEACCOUNT_PATH);
       cy.get('[data-cy="save-runtime-args-btn"]').click();
 
       // Run pipeline to generate lineage
@@ -72,9 +79,10 @@ describe('Generating and navigating field level lineage for datasets', () => {
 
     // Show unrelated fields
     cy.get('[data-cy="show-fields-panel-airport_source"]').click();
+    cy.get('[data-cy="hide-fields-panel-airport_source"]').should('exist');
     cy.get('[data-cy="cause-fields"] .grid-row').within(($fields) => {
-      expect($fields).to.contain('name');
       expect($fields).to.have.length(8);
+      expect($fields).to.contain('name');
     });
   });
   it('Should show operations for target field', () => {

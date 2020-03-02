@@ -118,7 +118,7 @@
             }
         ],
         "schedule": "0 * * * *",
-        "engine": "spark",
+        "engine": "mapreduce",
         "numOfRecordsPreview": 100,
         "description": "With wrangler. Drops fields to get unrelated fields.",
         "maxConcurrentRuns": 1
