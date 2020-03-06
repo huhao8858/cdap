@@ -28,10 +28,18 @@ import io.cdap.cdap.app.preview.DataTracerFactory;
 import io.cdap.cdap.app.preview.PreviewRequest;
 import io.cdap.cdap.app.preview.PreviewRunner;
 import io.cdap.cdap.app.preview.PreviewStatus;
+import io.cdap.cdap.app.program.ProgramDescriptor;
 import io.cdap.cdap.app.runtime.ProgramController;
+import io.cdap.cdap.app.runtime.ProgramOptions;
 import io.cdap.cdap.app.runtime.ProgramRuntimeService;
+import io.cdap.cdap.app.runtime.ProgramStateWriter;
 import io.cdap.cdap.app.store.preview.PreviewStore;
+import io.cdap.cdap.common.NotFoundException;
+import io.cdap.cdap.common.app.RunIds;
 import io.cdap.cdap.common.conf.Constants;
+import io.cdap.cdap.common.http.DefaultHttpRequestConfig;
+import io.cdap.cdap.common.id.Id;
+import io.cdap.cdap.common.internal.remote.RemoteClient;
 import io.cdap.cdap.common.logging.LoggingContextAccessor;
 import io.cdap.cdap.common.logging.ServiceLoggingContext;
 import io.cdap.cdap.common.namespace.NamespaceAdmin;
@@ -40,9 +48,13 @@ import io.cdap.cdap.data2.datafabric.dataset.service.executor.DatasetOpExecutorS
 import io.cdap.cdap.data2.dataset2.lib.table.leveldb.LevelDBTableService;
 import io.cdap.cdap.internal.app.deploy.ProgramTerminator;
 import io.cdap.cdap.internal.app.runtime.AbstractListener;
-import io.cdap.cdap.internal.app.services.ApplicationLifecycleService;
+import io.cdap.cdap.internal.app.runtime.BasicArguments;
+import io.cdap.cdap.internal.app.runtime.ProgramOptionConstants;
+import io.cdap.cdap.internal.app.runtime.SimpleProgramOptions;
+import io.cdap.cdap.internal.app.runtime.SystemArguments;
 import io.cdap.cdap.internal.app.services.ProgramLifecycleService;
 import io.cdap.cdap.internal.app.services.ProgramNotificationSubscriberService;
+import io.cdap.cdap.internal.app.services.PropertiesResolver;
 import io.cdap.cdap.internal.app.store.RunRecordDetail;
 import io.cdap.cdap.logging.appender.LogAppenderInitializer;
 import io.cdap.cdap.messaging.MessagingService;
@@ -53,15 +65,24 @@ import io.cdap.cdap.proto.artifact.AppRequest;
 import io.cdap.cdap.proto.artifact.preview.PreviewConfig;
 import io.cdap.cdap.proto.id.ApplicationId;
 import io.cdap.cdap.proto.id.NamespaceId;
+import io.cdap.cdap.proto.id.ProfileId;
 import io.cdap.cdap.proto.id.ProgramId;
 import io.cdap.cdap.proto.id.ProgramRunId;
 import io.cdap.cdap.spi.data.StructuredTableAdmin;
 import io.cdap.cdap.spi.data.table.StructuredTableRegistry;
 import io.cdap.cdap.store.StoreDefinition;
+import io.cdap.common.http.HttpMethod;
+import io.cdap.common.http.HttpRequest;
+import io.cdap.common.http.HttpResponse;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import org.apache.twill.api.RunId;
 import org.apache.twill.common.Threads;
+import org.apache.twill.discovery.DiscoveryServiceClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -73,6 +94,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import javax.annotation.Nullable;
+import javax.ws.rs.core.MediaType;
 
 /**
  * Default implementation of the {@link PreviewRunner}.
@@ -92,20 +114,22 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
   private final DatasetOpExecutorService dsOpExecService;
   private final DatasetService datasetService;
   private final LogAppenderInitializer logAppenderInitializer;
-  private final ApplicationLifecycleService applicationLifecycleService;
   private final ProgramRuntimeService programRuntimeService;
-  private final ProgramLifecycleService programLifecycleService;
+//  private final ProgramLifecycleService programLifecycleService;
   private final PreviewStore previewStore;
   private final DataTracerFactory dataTracerFactory;
   private final NamespaceAdmin namespaceAdmin;
   private final MetricsCollectionService metricsCollectionService;
   private final MetricsQueryHelper metricsQueryHelper;
   private final ProgramNotificationSubscriberService programNotificationSubscriberService;
-  private final LevelDBTableService levelDBTableService;
-  private final StructuredTableAdmin structuredTableAdmin;
+  private final LevelDBTableService levelDBTableService; // ???
+  private final StructuredTableAdmin structuredTableAdmin; // ???
   private final StructuredTableRegistry structuredTableRegistry;
   private final PreviewRequest previewRequest;
   private final CompletableFuture<PreviewStatus> completion;
+  private final RemoteClient remoteClient;
+  private final ProgramStateWriter programStateWriter;
+  private final PropertiesResolver propertiesResolver;
 
   private volatile boolean killedByTimer;
   private Timer timer;
@@ -116,9 +140,8 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
                        DatasetOpExecutorService dsOpExecService,
                        DatasetService datasetService,
                        LogAppenderInitializer logAppenderInitializer,
-                       ApplicationLifecycleService applicationLifecycleService,
                        ProgramRuntimeService programRuntimeService,
-                       ProgramLifecycleService programLifecycleService,
+//                       ProgramLifecycleService programLifecycleService,
                        PreviewStore previewStore, DataTracerFactory dataTracerFactory,
                        NamespaceAdmin namespaceAdmin,
                        MetricsCollectionService metricsCollectionService, MetricsQueryHelper metricsQueryHelper,
@@ -126,14 +149,16 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
                        LevelDBTableService levelDBTableService,
                        StructuredTableAdmin structuredTableAdmin,
                        StructuredTableRegistry structuredTableRegistry,
-                       PreviewRequest previewRequest) {
+                       DiscoveryServiceClient discoveryClient,
+                       PreviewRequest previewRequest,
+                       ProgramStateWriter programStateWriter,
+                       ) {
     this.messagingService = messagingService;
     this.dsOpExecService = dsOpExecService;
     this.datasetService = datasetService;
     this.logAppenderInitializer = logAppenderInitializer;
-    this.applicationLifecycleService = applicationLifecycleService;
     this.programRuntimeService = programRuntimeService;
-    this.programLifecycleService = programLifecycleService;
+//    this.programLifecycleService = programLifecycleService;  // TODO
     this.previewStore = previewStore;
     this.dataTracerFactory = dataTracerFactory;
     this.namespaceAdmin = namespaceAdmin;
@@ -145,6 +170,10 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
     this.structuredTableRegistry = structuredTableRegistry;
     this.previewRequest = previewRequest;
     this.completion = new CompletableFuture<>();
+    this.remoteClient = new RemoteClient(discoveryClient,
+                                         Constants.Service.APP_FABRIC_HTTP,
+                                         new DefaultHttpRequestConfig(false),
+                                         Constants.Gateway.API_VERSION_3);
   }
 
   @Override
@@ -172,9 +201,20 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
 
     try {
       LOG.debug("Deploying preview application for {}", programId);
-      applicationLifecycleService.deployApp(preview.getParent(), preview.getApplication(), preview.getVersion(),
-                                            artifactSummary, config, NOOP_PROGRAM_TERMINATOR, null,
-                                            request.canUpdateSchedules());
+
+      String namespace = preview.getParent().getNamespace();
+      String appName = preview.getApplication();
+      String appVersion = preview.getVersion();
+      String url = String.format("namespaces/%s/apps/%s/versions/%s/create", namespace, appName, appVersion);
+
+      HttpRequest httpRequest = remoteClient.requestBuilder(HttpMethod.POST, url)
+        .addHeader(HttpHeaderNames.CONTENT_TYPE.toString(), MediaType.APPLICATION_JSON)
+        .withBody(GSON.toJson(request))
+        .build();
+      HttpResponse httpResponse = remoteClient.execute(httpRequest);
+      if (httpResponse.getResponseCode() != HttpURLConnection.HTTP_OK) {
+        throw new Exception(httpResponse.getResponseBodyAsString());
+      }
     } catch (Exception e) {
       setStatus(new PreviewStatus(PreviewStatus.Status.DEPLOY_FAILED, new BasicThrowable(e), null, null));
       throw e;
@@ -347,7 +387,6 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
                                                                        Constants.Logging.COMPONENT_NAME,
                                                                        Constants.Service.PREVIEW_HTTP));
     Futures.allAsList(
-      applicationLifecycleService.start(),
       programRuntimeService.start(),
       metricsCollectionService.start(),
       programNotificationSubscriberService.start()
@@ -377,9 +416,42 @@ public class DefaultPreviewRunner extends AbstractIdleService implements Preview
       timer.cancel();
     }
     programRuntimeService.stopAndWait();
-    applicationLifecycleService.stopAndWait();
     logAppenderInitializer.close();
     metricsCollectionService.stopAndWait();
     programNotificationSubscriberService.stopAndWait();
+  }
+
+  private ProgramController startProgram(ProgramId programId, Map<String, String> overrides, boolean debug) throws IOException, NotFoundException {
+    // TODO: fix concurerncy check
+//    checkConcurrentExecution(programId);
+
+    Map<String, String> sysArgs = propertiesResolver.getSystemProperties(Id.Program.fromEntityId(programId));
+    sysArgs.put(ProgramOptionConstants.SKIP_PROVISIONING, "true");
+    sysArgs.put(SystemArguments.PROFILE_NAME, ProfileId.NATIVE.getScopedName());
+    Map<String, String> userArgs = propertiesResolver.getUserProperties(Id.Program.fromEntityId(programId));
+    if (overrides != null) {
+      userArgs.putAll(overrides);
+    }
+
+    // TODO:
+//    authorizePipelineRuntimeImpersonation(userArgs);
+
+    BasicArguments systemArguments = new BasicArguments(sysArgs);
+    BasicArguments userArguments = new BasicArguments(userArgs);
+    ProgramOptions options = new SimpleProgramOptions(programId, systemArguments, userArguments, debug);
+    ProgramDescriptor programDescriptor = store.loadProgram(programId);
+    ProgramRunId programRunId = programId.run(RunIds.generate());
+
+    programStateWriter.start(programRunId, options, null, programDescriptor);
+
+    RunId runId = RunIds.fromString(programRunId.getRun());
+
+    synchronized (this) {
+      ProgramRuntimeService.RuntimeInfo runtimeInfo = programRuntimeService.lookup(programRunId.getParent(), runId);
+      if (runtimeInfo != null) {
+        return runtimeInfo.getController();
+      }
+      return programRuntimeService.run(programDescriptor, options, runId).getController();
+    }
   }
 }

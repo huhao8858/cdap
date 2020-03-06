@@ -570,6 +570,7 @@ public class ProgramLifecycleService {
    *                               a user requires {@link Action#EXECUTE} on the program
    * @throws Exception if there were other exceptions checking if the current user is authorized to start the program
    */
+  // TODO: remove
   public ProgramController start(ProgramId programId, Map<String, String> overrides, boolean debug) throws Exception {
     authorizationEnforcer.enforce(programId, authenticationContext.getPrincipal(), Action.EXECUTE);
     checkConcurrentExecution(programId);
