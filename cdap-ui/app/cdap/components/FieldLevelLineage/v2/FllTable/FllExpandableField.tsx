@@ -19,7 +19,6 @@ import withStyles, { WithStyles } from '@material-ui/core/styles/withStyles';
 import classnames from 'classnames';
 import KeyboardArrowDownIcon from '@material-ui/icons/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@material-ui/icons/KeyboardArrowUp';
-import If from 'components/If';
 import T from 'i18n-react';
 
 export const styles = (theme) => {
@@ -44,6 +43,7 @@ function ExpandableField({ isExpanded, handleClick, tablename, classes }: IExpan
   const message = isExpanded
     ? T.translate(`${I18N_PREFIX}.hideFields`)
     : T.translate(`${I18N_PREFIX}.showFields`);
+  const arrowIcon = isExpanded ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />;
   return (
     <div
       className={classnames('grid-row', 'grid-link', classes.root)}
@@ -51,12 +51,7 @@ function ExpandableField({ isExpanded, handleClick, tablename, classes }: IExpan
       onClick={handleClick}
     >
       {message}
-      <If condition={!isExpanded}>
-        <KeyboardArrowDownIcon />
-      </If>
-      <If condition={isExpanded}>
-        <KeyboardArrowUpIcon />
-      </If>
+      {arrowIcon}
     </div>
   );
 }

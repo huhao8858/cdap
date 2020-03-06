@@ -155,7 +155,7 @@ function FllTable({ tableId, tableInfo, type, isActive, classes }: ITableProps) 
   const { target, activeCauseSets, activeImpactSets, handleExpandFields } = useContext<
     IContextState
   >(FllContext);
-  let fields = tableInfo?.fields;
+  let fields = tableInfo ? tableInfo.fields : [];
 
   if (!fields || fields.length === 0) {
     return (
